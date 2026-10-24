@@ -352,6 +352,17 @@ static bool parseOptionFile(const char *filename, PonscripterLabel &ons,
     return false;
 }
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+
+static PonscripterLabel* web_ons = NULL;
+
+extern "C" EMSCRIPTEN_KEEPALIVE void pons_save_all()
+{
+    if (web_ons) web_ons->webSaveAll();
+}
+#endif
+
 #ifdef QWS
 int SDL_main(int argc, char** argv)
 #elif defined (PSP)
@@ -362,6 +373,9 @@ int main(int argc, char** argv)
 {
     PonscripterLabel ons;
     pstring preferred_script = "";
+#ifdef __EMSCRIPTEN__
+    web_ons = &ons;
+#endif
 
 #ifdef PSP
     ons.disableRescale();

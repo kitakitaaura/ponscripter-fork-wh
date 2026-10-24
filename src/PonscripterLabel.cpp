@@ -1454,7 +1454,10 @@ void PonscripterLabel::flush(int refresh_mode, SDL_Rect* rect, bool clear_dirty_
                     flushDirect(dirty_rect.history[i], refresh_mode, false);
                 }
 
-                flushDirect(*rect, refresh_mode);
+                // rect is NULL for plain flush(mode) calls. Dereferencing it
+                // is undefined; with flush inlined into mouseOverCheck, clang
+                // dropped this branch and the loop above ran forever in wasm.
+                flushDirect(rect ? *rect : dirty_rect.bounding_box, refresh_mode);
             }
         }
     }
@@ -1962,6 +1965,18 @@ void PonscripterLabel::warpMouse(int x, int y) {
   y = y * scale_y;
 
   SDL_WarpMouseInWindow(screen, x, y);
+#ifdef __EMSCRIPTEN__
+  // Browsers can't move the pointer, so SDL's warp does nothing there. Post
+  // the motion a real move would make; the renderer's event watch maps it
+  // back to logical coordinates and mouseOverCheck highlights the button.
+  SDL_Event motion;
+  SDL_zero(motion);
+  motion.type = SDL_MOUSEMOTION;
+  motion.motion.windowID = SDL_GetWindowID(screen);
+  motion.motion.x = x;
+  motion.motion.y = y;
+  SDL_PushEvent(&motion);
+#endif
 
   last_mouse_x = x;
   last_mouse_y = y;

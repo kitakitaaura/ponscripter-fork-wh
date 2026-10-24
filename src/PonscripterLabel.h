@@ -98,6 +98,11 @@ public:
 
     PonscripterLabel();
     ~PonscripterLabel();
+#ifdef __EMSCRIPTEN__
+    // A browser tab never quits, so the page asks for the quit-time saves
+    // (global variables, read text, settings) when it is hidden instead.
+    void webSaveAll() { saveAll(); }
+#endif
 
     // ----------------------------------------
     // start-up options

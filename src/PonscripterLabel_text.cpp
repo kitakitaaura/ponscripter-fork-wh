@@ -25,6 +25,24 @@
 
 #include "PonscripterLabel.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <string>
+// noberu: the text on screen (UTF-8), for its reading tools. Handed to the
+// page at each click wait.
+static std::string noberu_text;
+static void noberuTextSend()
+{
+    if (noberu_text.empty()) return;
+    EM_ASM({ if (Module.noberuText) Module.noberuText(HEAPU8.slice($0, $0 + $1)); },
+           noberu_text.data(), (int)noberu_text.size());
+    noberu_text.clear();
+}
+#else
+static std::string noberu_text;
+static void noberuTextSend() { noberu_text.clear(); }
+#endif
+
 Glyph
 PonscripterLabel::renderGlyph(Font* font, Uint16 text, int size,
                               float x_fractional_part)
@@ -184,6 +202,10 @@ PonscripterLabel::drawChar(const char* text, Fontinfo* info, bool flush_flag,
         /* Update text buffer */
         info->advanceBy(adv);
     }
+
+    // noberu: only the language on screen (Ciconia carries two).
+    if (lookback_flag && (current_read_language == -1 || current_read_language == current_language))
+        noberu_text.append(text, bytes);
 
     // textbufferchange
     int j;
@@ -385,6 +407,7 @@ int PonscripterLabel::clickWait(bool display_char)
             bytes = 1; // @, \, etc...?
             flush(refreshMode());
         }
+        noberuTextSend();
         string_buffer_offset += bytes;
         num_chars_in_sentence = 0;
         return RET_CONTINUE | RET_NOREAD;
@@ -403,6 +426,7 @@ int PonscripterLabel::clickWait(bool display_char)
                      &text_info);
             ++num_chars_in_sentence;
         }
+        noberuTextSend();
         if (textgosub_label) {
             const char* next_text = c + 1;
             
@@ -442,6 +466,7 @@ int PonscripterLabel::clickNewPage(bool display_char)
         }
     }
     
+    noberuTextSend();
     if (skip_flag || draw_one_page_flag || skip_to_wait ||
         ctrl_pressed_status || (sentence_font.wait_time == 0))
         flush(refreshMode());
@@ -543,6 +568,7 @@ int PonscripterLabel::processText()
 
     if (script_h.readStrBuf(string_buffer_offset) == 0x0a ||
         script_h.readStrBuf(string_buffer_offset) == 0x00) {
+        if (!noberu_text.empty() && noberu_text[noberu_text.size() - 1] != '\n') noberu_text += '\n';
         indent_offset = 0; // redundant
         skip_to_wait = 0;
         return RET_CONTINUE;

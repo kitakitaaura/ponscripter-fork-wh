@@ -30,6 +30,11 @@
 #endif
 
 #include "PonscripterUserEvents.h"
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <algorithm>
+#include <vector>
+#endif
 
 #define EDIT_MODE_PREFIX "[EDIT MODE]  "
 #define EDIT_SELECT_STRING "MP3 vol (m)  SE vol (s)  Voice vol (v)  Numeric variable (n)"
@@ -701,6 +706,44 @@ void PonscripterLabel::variableEditMode(SDL_KeyboardEvent* event)
 
 void PonscripterLabel::shiftCursorOnButton(int diff)
 {
+#ifdef __EMSCRIPTEN__
+    // Upstream turned keyboard navigation off (below), and its version walks
+    // shortcut_mouse_line, which goes stale when the script swaps buttons.
+    // On the web, where a phone's on-screen pad only has arrow keys, step
+    // through the current buttons in screen order instead, starting from the
+    // highlighted one. diff 0 (snap when a menu opens) is left off.
+    if (diff == 0) return;
+    std::vector<std::pair<std::pair<int, int>, int> > order;  // (y, x), button id
+    for (ButtonElt::iterator it = buttons.begin(); it != buttons.end(); ++it) {
+        const SDL_Rect& r = it->second.select_rect;
+        if (it->first <= 0 || r.w <= 0 || r.h <= 0) continue;
+        order.push_back(std::make_pair(
+            std::make_pair(r.y + r.h / 2, r.x + r.w / 2), it->first));
+    }
+    if (order.empty()) return;
+    std::sort(order.begin(), order.end());
+
+    int n = (int) order.size(), next = -1;
+    for (int i = 0; i < n; ++i) {
+        if (order[i].second == current_over_button) {
+            // Up arrives as diff 1, down as -1.
+            next = (i + (diff > 0 ? -1 : 1) + n) % n;
+            break;
+        }
+    }
+    if (next < 0) next = diff > 0 ? n - 1 : 0;
+
+    int tx = order[next].first.second, ty = order[next].first.first;
+    if (tx < 0) tx = 0; else if (tx >= screen_width) tx = screen_width - 1;
+    if (ty < 0) ty = 0; else if (ty >= screen_height) ty = screen_height - 1;
+    warpMouse(tx, ty);
+    // The posted motion lands behind any keys already queued, so highlight
+    // now; a second quick press then moves on from here.
+    current_button_state.x = tx;
+    current_button_state.y = ty;
+    mouseOverCheck(tx, ty);
+    return;
+#endif
     // TODO Chronotrig did this, I'm so sorry, I'll fix it later
     if (true) {
         return;
@@ -1217,8 +1260,21 @@ int PonscripterLabel::eventLoop()
     bool using_buttonbased_movement = true;  // true to snap to main menu when it loads
     first_buttonwait_mode_frame = false;  // if it's the first frame of a buttonwait (menu/choice), snap to default button
     SDL_GetMouseState(&last_mouse_x, &last_mouse_y);
+#ifdef __EMSCRIPTEN__
+    Uint32 last_yield = SDL_GetTicks();
+#endif
 
     while (SDL_WaitEvent(&event)) {
+#ifdef __EMSCRIPTEN__
+        // The loop below only sleeps when a redraw finishes inside the
+        // refresh interval. A slow redraw in wasm keeps it from ever
+        // sleeping, and a browser page that never yields freezes, so give
+        // the browser a turn at least once a frame.
+        if (SDL_GetTicks() - last_yield >= 16) {
+            emscripten_sleep(0);
+            last_yield = SDL_GetTicks();
+        }
+#endif
         // ignore continous SDL_MOUSEMOTION
         while (event.type == SDL_MOUSEMOTION) {
             if (SDL_PeepEvents(&tmp_event, 1, SDL_PEEKEVENT, SDL_FIRSTEVENT, SDL_LASTEVENT) == 0) break;
